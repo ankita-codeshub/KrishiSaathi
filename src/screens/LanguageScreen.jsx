@@ -7,6 +7,8 @@ import {
   ScrollView,
   Image,
   ImageBackground,
+  Keyboard,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,6 +18,8 @@ import { useLanguage } from "../hooks/useLanguage";
 
 const LanguageScreen = ({ navigation }) => {
   const textInputRef = useRef(null);
+  const scrollViewRef = useRef(null);
+  const continueButtonRef = useRef(null);
   const [keyInput, setKeyInput] = useState("");
   const [isPaused, setIsPaused] = useState(false);
 
@@ -32,7 +36,7 @@ const LanguageScreen = ({ navigation }) => {
   const handleTextInputChange = (val) => {
     setKeyInput(val);
     handleTextEntry(val);
-    setTimeout(() => setKeyInput(""), 500);
+    setTimeout(() => setKeyInput(""), 2000);
   };
 
   const togglePlayPause = async () => {
@@ -45,11 +49,11 @@ const LanguageScreen = ({ navigation }) => {
           isAnnouncementRunningRef.current = false;
         }
       } else if (isPaused) {
-        // Was paused - resume from beginning or restart
+        // Was paused - resume
         setIsPaused(false);
-        await replayVoice(); // This will restart the voice
+        await replayVoice();
       } else {
-        // Not speaking at all - start
+        // Not speaking - play again
         await replayVoice();
       }
     } catch (error) {
@@ -57,16 +61,74 @@ const LanguageScreen = ({ navigation }) => {
     }
   };
 
+  const stopSpeech = async () => {
+    try {
+      await Speech.stop();
+      setIsPaused(false);
+      if (isAnnouncementRunningRef) {
+        isAnnouncementRunningRef.current = false;
+      }
+    } catch (error) {
+      console.log("Error stopping speech:", error);
+    }
+  };
+
+  // Simple function to scroll to continue button
+  const scrollToContinueButton = () => {
+    if (selectedLanguage && scrollViewRef.current && continueButtonRef.current) {
+      // Use measure to get the position of the continue button
+      continueButtonRef.current.measure((x, y, width, height, pageX, pageY) => {
+        // Scroll to the button's position with a small offset to show it properly
+        scrollViewRef.current?.scrollTo({
+          y: pageY - 50, // Show button with a little space above
+          animated: true,
+        });
+      });
+    }
+  };
+
   useEffect(() => {
-    // Reset pause state when speaking stops naturally
     if (!isSpeaking) {
       setIsPaused(false);
     }
   }, [isSpeaking]);
 
   useEffect(() => {
-    if (textInputRef.current) textInputRef.current.focus();
-  }, []);
+    // Focus the hidden input when screen loads
+    textInputRef.current?.focus();
+
+    // Keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => {
+        // When keyboard appears, scroll to continue button if language is selected
+        setTimeout(() => {
+          if (selectedLanguage) {
+            scrollToContinueButton();
+          }
+        }, 300);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+    };
+  }, [selectedLanguage]);
+
+  // Scroll when language is selected
+  useEffect(() => {
+    if (selectedLanguage) {
+      // Small delay to ensure layout is complete
+      setTimeout(() => {
+        scrollToContinueButton();
+      }, 300);
+    }
+  }, [selectedLanguage]);
+
+  // Keep input focused
+  const handleTouchablePress = () => {
+    setTimeout(() => textInputRef.current?.focus(), 50);
+  };
 
   return (
     <ImageBackground
@@ -86,6 +148,7 @@ const LanguageScreen = ({ navigation }) => {
       />
 
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        {/* Hidden TextInput for number pad */}
         <TextInput
           ref={textInputRef}
           style={{ position: "absolute", width: 0, height: 0, opacity: 0 }}
@@ -94,17 +157,22 @@ const LanguageScreen = ({ navigation }) => {
           onChangeText={handleTextInputChange}
           maxLength={1}
           autoFocus
-          onBlur={() => textInputRef.current?.focus()}
+          onBlur={() => {
+            textInputRef.current?.focus();
+          }}
         />
 
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={{
             flexGrow: 1,
             padding: 20,
-            justifyContent: "center",
+            paddingBottom: 40,
           }}
           showsVerticalScrollIndicator={false}
           style={{ backgroundColor: 'transparent' }}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
         >
           <View style={{ alignItems: "center", marginBottom: 30 }}>
             <Image
@@ -126,14 +194,19 @@ const LanguageScreen = ({ navigation }) => {
             </Text>
           </View>
 
-          {/* PLAY/PAUSE TOGGLE BUTTON */}
+          {/* SPEECH CONTROL BUTTONS */}
           <View style={{ 
-            alignItems: "center",
+            flexDirection: "row",
+            justifyContent: "center",
             marginBottom: 30,
-            width: "100%",
+            gap: 10,
           }}>
+            {/* PLAY/PAUSE/RESUME BUTTON */}
             <TouchableOpacity
-              onPress={togglePlayPause}
+              onPress={(e) => {
+                togglePlayPause();
+                handleTouchablePress();
+              }}
               activeOpacity={0.8}
               style={{
                 borderRadius: 60,
@@ -143,7 +216,7 @@ const LanguageScreen = ({ navigation }) => {
                 shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.3,
                 shadowRadius: 5,
-                width: "80%",
+                width: "60%", // Full width when STOP is hidden, stays same when STOP is visible
               }}
             >
               <LinearGradient
@@ -156,7 +229,7 @@ const LanguageScreen = ({ navigation }) => {
                 end={{ x: 1, y: 0 }}
                 style={{
                   paddingVertical: 16,
-                  paddingHorizontal: 30,
+                  paddingHorizontal: 20,
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "center",
@@ -166,19 +239,19 @@ const LanguageScreen = ({ navigation }) => {
                   backgroundColor: "rgba(255,255,255,0.2)",
                   borderRadius: 30,
                   padding: 5,
-                  marginRight: 12,
+                  marginRight: 8,
                 }}>
                   <Ionicons 
                     name={
                       isPaused ? "play" :
                       isSpeaking ? "pause" : "play"
                     } 
-                    size={24} 
+                    size={20} 
                     color="#fff" 
                   />
                 </View>
-                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 18, letterSpacing: 0.5 }}>
-                  {isPaused ? "RESUME" : isSpeaking ? "PAUSE" : "PLAY VOICE AGAIN"}
+                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>
+                  {isPaused ? "RESUME" : isSpeaking ? "PAUSE" : "PLAY AGAIN"}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -206,7 +279,10 @@ const LanguageScreen = ({ navigation }) => {
           {languages.map((language) => (
             <TouchableOpacity
               key={language.code}
-              onPress={() => handleLanguageSelect(language.code)}
+              onPress={() => {
+                handleLanguageSelect(language.code);
+                handleTouchablePress();
+              }}
               activeOpacity={0.7}
               style={{
                 flexDirection: "row",
@@ -294,6 +370,7 @@ const LanguageScreen = ({ navigation }) => {
           {/* SELECTION CARD */}
           {selectedLanguage && (
             <View
+              ref={continueButtonRef}
               style={{
                 marginTop: 30,
                 marginBottom: 20,
@@ -305,6 +382,7 @@ const LanguageScreen = ({ navigation }) => {
                 shadowOpacity: 0.3,
                 shadowRadius: 8,
               }}
+              collapsable={false}
             >
               <LinearGradient
                 colors={["rgba(76, 175, 80, 0.95)", "rgba(46, 125, 50, 0.95)", "rgba(27, 94, 32, 0.95)"]}
@@ -350,8 +428,7 @@ const LanguageScreen = ({ navigation }) => {
                 {/* CONTINUE BUTTON */}
                 <TouchableOpacity
                   onPress={async () => {
-                    isAnnouncementRunningRef.current = false;
-                    await Speech.stop();
+                    await stopSpeech();
                     navigation.replace("Login");
                   }}
                   activeOpacity={0.8}
